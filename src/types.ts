@@ -57,7 +57,7 @@ export interface StudyCard {
 }
 
 export interface StudyData {
-  sessionId: number
+  sessionId: number | null
   setId: number
   setName: string
   hotkeys: Record<number, string>

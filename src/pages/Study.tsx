@@ -34,6 +34,7 @@ function Study() {
   const [rated, setRated] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   const keyToPos = useRef<Record<string, number>>({})
+  const sessionIdRef = useRef<number | null>(null)
   const stateRef = useRef<StudyRef>({ idx: 0, faceIndex: 0, history: [], rated: {}, busy: false })
   const sectionRef = useRef<HTMLElement | null>(null)
   const lastWheelRef = useRef(0)
@@ -46,6 +47,7 @@ function Study() {
       })
       .then((d: StudyData) => {
         setData(d)
+        sessionIdRef.current = d.sessionId
         const map: Record<string, number> = {}
         Object.entries(d.hotkeys || {}).forEach(([pos, key]) => { map[key] = parseInt(pos, 10) })
         keyToPos.current = map
@@ -98,9 +100,11 @@ function Study() {
         const res = await fetch(`/api/sets/${id}/study/review`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: data.sessionId, cardId: cur.id, know }),
+          body: JSON.stringify({ sessionId: sessionIdRef.current, cardId: cur.id, know }),
         })
         if (!res.ok) throw new Error('review request failed')
+        const result = (await res.json().catch(() => null)) as { sessionId?: number } | null
+        if (result && typeof result.sessionId === 'number') sessionIdRef.current = result.sessionId
         st.busy = false
         setBusy(false)
         advanceAfterRate(know, cur.id)

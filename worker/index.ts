@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import * as db from './db';
-import type { User } from './db';
+import type { CardFieldRow, User } from './db';
 import { generateToken, requireUser, SESSION_COOKIE_NAME, seedIfNeeded, sessionExpiresAt, sessionUser, userFrom, verifyPassword } from './auth';
 import { scheduleReview } from './fsrs';
 import { computeProgress, computeStreak, isStudySession, validHotkeyKey, type ApiCard, type ApiFace, type ApiSet } from './models';
@@ -66,11 +66,13 @@ app.get('/api/dashboard', requireUser, async (c) => {
   const user = userFrom(c);
   const database = c.env.DB;
 
-  const sets = await db.listSets(database, user.id);
-  const flashcardCounts = await db.countFlashcardsBySet(database, user.id);
-  const sessionSizes = await db.listSessionSizesBySet(database, user.id);
-  const masteredCounts = await db.masteredCountBySet(database, user.id);
-  const studyDates = await db.getStudyDates(database, user.id);
+  const [sets, flashcardCounts, sessionSizes, masteredCounts, studyDates] = await Promise.all([
+    db.listSets(database, user.id),
+    db.countFlashcardsBySet(database, user.id),
+    db.listSessionSizesBySet(database, user.id),
+    db.masteredCountBySet(database, user.id),
+    db.getStudyDates(database, user.id),
+  ]);
 
   const fcBySet = new Map(flashcardCounts.map((r) => [r.set_id, r.flashcard_count]));
   const studiesBySet = new Map<number, number>();
@@ -125,17 +127,17 @@ app.get('/api/sets/:id', requireUser, async (c) => {
   const set = await db.getSet(c.env.DB, setId, user.id);
   if (!set) return c.json({ error: 'not found' }, 404);
 
-  const faces = await db.listFaces(c.env.DB, setId);
-  const cards = await db.listCards(c.env.DB, setId);
+  const [faces, cards, fields] = await Promise.all([
+    db.listFaces(c.env.DB, setId),
+    db.listCards(c.env.DB, setId),
+    db.listCardFieldsBySet(c.env.DB, setId),
+  ]);
   const faceViews: ApiFace[] = faces.map((f) => ({ id: f.id, name: f.name, position: f.position }));
-  const cardViews: ApiCard[] = [];
-  for (const card of cards) {
-    const fields = await db.getCardFields(c.env.DB, card.id);
-    cardViews.push({
-      id: card.id,
-      fields: fields.map((f) => ({ faceId: f.face_id, name: f.face_name, value: f.value })),
-    });
-  }
+  const fieldsByCard = groupFieldsByCard(fields);
+  const cardViews: ApiCard[] = cards.map((card) => ({
+    id: card.id,
+    fields: (fieldsByCard.get(card.id) ?? []).map((f) => ({ faceId: f.face_id, name: f.face_name, value: f.value })),
+  }));
 
   return c.json({
     set: { id: set.id, name: set.name, description: set.description },
@@ -145,6 +147,16 @@ app.get('/api/sets/:id', requireUser, async (c) => {
 });
 
 // --- cards ---
+
+function groupFieldsByCard(fields: CardFieldRow[]): Map<number, CardFieldRow[]> {
+  const byCard = new Map<number, CardFieldRow[]>();
+  for (const field of fields) {
+    const existing = byCard.get(field.flashcard_id);
+    if (existing) existing.push(field);
+    else byCard.set(field.flashcard_id, [field]);
+  }
+  return byCard;
+}
 
 function decodeFields(values: Record<string, unknown>): Map<number, string> {
   const fields = new Map<number, string>();
@@ -242,37 +254,41 @@ app.get('/api/sets/:id/study', requireUser, async (c) => {
   const set = await db.getSet(c.env.DB, setId, user.id);
   if (!set) return c.json({ error: 'not found' }, 404);
 
-  const sessionId = await db.createStudySession(c.env.DB, setId, user.id);
-  const cards = await db.listCards(c.env.DB, setId);
-  const dueRows = await db.listCardFSRSBySet(c.env.DB, setId, user.id);
+  const [cards, dueRows, fieldRows, hotkeyRows, faces] = await Promise.all([
+    db.listCards(c.env.DB, setId),
+    db.listCardFSRSBySet(c.env.DB, setId, user.id),
+    db.listCardFieldsBySet(c.env.DB, setId),
+    db.getHotkeys(c.env.DB, user.id),
+    db.listFaces(c.env.DB, setId),
+  ]);
   const dueByCard = new Map(dueRows.map((d) => [d.flashcard_id, d.due]));
+  const fieldsByCard = groupFieldsByCard(fieldRows);
 
   const now = Date.now();
-  const ordered: { card: { id: number; fields: { name: string; value: string }[] }; due: number }[] = [];
-  for (const card of cards) {
-    const fields = await db.getCardFields(c.env.DB, card.id);
+  const ordered = cards.map((card) => {
     const dueRaw = dueByCard.get(card.id);
     let due = now;
     if (dueRaw) {
       const t = new Date(dueRaw).getTime();
       if (!Number.isNaN(t)) due = t;
     }
-    ordered.push({
-      card: { id: card.id, fields: fields.map((f) => ({ name: f.face_name, value: f.value })) },
+    return {
+      card: {
+        id: card.id,
+        fields: (fieldsByCard.get(card.id) ?? []).map((f) => ({ name: f.face_name, value: f.value })),
+      },
       due,
-    });
-  }
+    };
+  });
   ordered.sort((a, b) => a.due - b.due);
 
-  const hotkeyRows = await db.getHotkeys(c.env.DB, user.id);
   const hotkeys: Record<number, string> = {};
   for (const hk of hotkeyRows) hotkeys[hk.position] = hk.key;
 
-  const faces = await db.listFaces(c.env.DB, setId);
   const faceNames = faces.map((f) => f.name);
 
   return c.json({
-    sessionId,
+    sessionId: null,
     setId,
     setName: set.name,
     hotkeys,
@@ -290,8 +306,8 @@ app.post('/api/sets/:id/study/review', requireUser, async (c) => {
     .json<{ sessionId?: number; cardId?: number; know?: boolean }>()
     .catch(() => ({}) as { sessionId?: number; cardId?: number; know?: boolean });
   const cardId = Number(body.cardId);
-  const sessionId = Number(body.sessionId);
-  if (!Number.isInteger(cardId) || !Number.isInteger(sessionId)) return c.json({ error: 'invalid body' }, 400);
+  const requestedSessionId = Number(body.sessionId);
+  if (!Number.isInteger(cardId)) return c.json({ error: 'invalid body' }, 400);
 
   const cardSet = await db.getCardSetID(c.env.DB, cardId);
   if (cardSet === null || cardSet !== setId) return c.json({ error: 'not found' }, 404);
@@ -299,10 +315,13 @@ app.post('/api/sets/:id/study/review', requireUser, async (c) => {
   const know = body.know === true;
   const state = await scheduleReview(c.env.DB, user.id, cardId, know);
 
+  const sessionId = Number.isInteger(requestedSessionId) && requestedSessionId > 0
+    ? requestedSessionId
+    : await db.createStudySession(c.env.DB, setId, user.id);
   await db.createCardReview(c.env.DB, sessionId, cardId, know ? 'correct' : 'incorrect');
   await db.incrementSessionReviews(c.env.DB, sessionId);
 
-  return c.json({ ok: true, due: state.due });
+  return c.json({ ok: true, due: state.due, sessionId });
 });
 
 // --- settings ---

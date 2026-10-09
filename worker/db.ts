@@ -173,18 +173,15 @@ export async function listSessionSizesBySet(db: D1Database, userId: number): Pro
 export async function masteredCountBySet(db: D1Database, userId: number): Promise<MasteredBySet[]> {
   const { results } = await db
     .prepare(
-      `WITH latest_review AS (
-         SELECT cr.flashcard_id AS flashcard_id, cr.outcome AS outcome
-         FROM card_reviews cr
-         WHERE cr.id = (
-           SELECT MAX(cr2.id) FROM card_reviews cr2 WHERE cr2.flashcard_id = cr.flashcard_id
-         )
+      `WITH latest AS (
+         SELECT flashcard_id, MAX(id) AS max_id FROM card_reviews GROUP BY flashcard_id
        )
        SELECT f.set_id AS set_id, COUNT(*) AS mastered_count
        FROM flashcards f
-       JOIN latest_review lr ON lr.flashcard_id = f.id
+       JOIN latest l ON l.flashcard_id = f.id
+       JOIN card_reviews cr ON cr.id = l.max_id
        JOIN flashcard_sets s ON s.id = f.set_id
-       WHERE lr.outcome = 'correct' AND s.user_id = ?
+       WHERE cr.outcome = 'correct' AND s.user_id = ?
        GROUP BY f.set_id`,
     )
     .bind(userId)
@@ -275,16 +272,17 @@ export async function getCardSetID(db: D1Database, cardId: number): Promise<numb
   return row?.set_id ?? null;
 }
 
-export async function getCardFields(db: D1Database, flashcardId: number): Promise<CardFieldRow[]> {
+export async function listCardFieldsBySet(db: D1Database, setId: number): Promise<CardFieldRow[]> {
   const { results } = await db
     .prepare(
       `SELECT cf.flashcard_id AS flashcard_id, cf.face_id AS face_id, sf.name AS face_name, cf.value AS value
        FROM flashcard_fields cf
+       JOIN flashcards f ON f.id = cf.flashcard_id
        JOIN set_faces sf ON sf.id = cf.face_id
-       WHERE cf.flashcard_id = ?
-       ORDER BY sf.position ASC`,
+       WHERE f.set_id = ?
+       ORDER BY cf.flashcard_id ASC, sf.position ASC`,
     )
-    .bind(flashcardId)
+    .bind(setId)
     .all<CardFieldRow>();
   return results;
 }

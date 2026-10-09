@@ -88,3 +88,12 @@ CREATE TABLE IF NOT EXISTS card_fsrs (
     last_review    TEXT,
     PRIMARY KEY (user_id, flashcard_id)
 );
+
+-- Indexes for hot foreign-key lookups. SQLite does not index foreign keys
+-- automatically, so these are required for fast set/study/dashboard queries.
+CREATE INDEX IF NOT EXISTS idx_flashcards_set_id      ON flashcards(set_id);
+CREATE INDEX IF NOT EXISTS idx_set_faces_set_id       ON set_faces(set_id);
+CREATE INDEX IF NOT EXISTS idx_card_reviews_flashcard ON card_reviews(flashcard_id);
+CREATE INDEX IF NOT EXISTS idx_card_fsrs_flashcard    ON card_fsrs(flashcard_id);
+CREATE INDEX IF NOT EXISTS idx_study_sessions_user    ON study_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_sets_user    ON flashcard_sets(user_id);
