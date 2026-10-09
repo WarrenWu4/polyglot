@@ -8,12 +8,20 @@
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-10-06",
 	"assets": {
+		"binding": "ASSETS",
 		"not_found_handling": "single-page-application"
 	},
 	"observability": {
 		"enabled": true
 	},
-	"upload_source_maps": true
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "polyglot_dev",
+			"database_id": "1e76f451-3257-4790-8a18-06eb43f1ae68"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
