@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type { StudyData, StudyField } from '../types'
 import Layout from '../components/Layout'
+import { FaEye, FaEyeSlash } from 'react-icons/fa'
 
 const baseButton = 'px-4 py-2 border-4 font-bold text-lg cursor-pointer transition disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-black'
 const controlButton = `${baseButton} border-black hover:bg-black hover:text-white md:flex-1`
@@ -33,6 +34,7 @@ function Study() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [rated, setRated] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
+  const [showPinyin, setShowPinyin] = useState(true)
   const keyToPos = useRef<Record<string, number>>({})
   const sessionIdRef = useRef<number | null>(null)
   const stateRef = useRef<StudyRef>({ idx: 0, faceIndex: 0, history: [], rated: {}, busy: false })
@@ -199,15 +201,27 @@ function Study() {
         <section
           ref={sectionRef}
           onClick={cycle}
-          className="select-none border-4 border-black min-h-55 p-6 sm:p-10 flex flex-col items-center justify-center gap-3 text-center cursor-pointer"
+          className="relative select-none border-4 border-black min-h-55 p-6 sm:p-10 flex flex-col items-center justify-center gap-3 text-center cursor-pointer"
         >
+          {!done && cards.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setShowPinyin((v) => !v) }}
+              aria-label={showPinyin ? 'Hide pinyin' : 'Show pinyin'}
+              aria-pressed={showPinyin}
+              title={showPinyin ? 'Hide pinyin' : 'Show pinyin'}
+              className="absolute top-2 right-2 p-2 border-4 border-black bg-white text-lg cursor-pointer transition hover:bg-black hover:text-white"
+            >
+              {showPinyin ? <FaEye /> : <FaEyeSlash />}
+            </button>
+          )}
           {error && <p className="text-lg font-bold text-red-600">{error}</p>}
           {!error && cards.length === 0 && <p className="text-xl font-medium">No cards in this set.</p>}
           {done && <p className="text-2xl font-semibold">Session complete! Nice work.</p>}
           {!done && cards.length > 0 && (
             <>
               <p className="text-sm font-bold uppercase tracking-widest">{faceName}</p>
-              {auxPinyin && <p className="text-lg sm:text-2xl text-black/60 whitespace-pre-wrap break-words max-w-full">{auxPinyin}</p>}
+              {showPinyin && auxPinyin && <p className="text-lg sm:text-2xl text-black/60 whitespace-pre-wrap break-words max-w-full">{auxPinyin}</p>}
               <p className="text-2xl sm:text-3xl font-semibold whitespace-pre-wrap break-words max-w-full">{faceValue}</p>
             </>
           )}
