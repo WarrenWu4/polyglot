@@ -77,7 +77,7 @@ npm run db:seed    # load the example dataset again
 ```
 db/
   schema.sql                              # D1 schema (all tables)
-  seed_1500_common_chinese_characters.sql # example dataset (1 set, 1500 cards)
+  seed_1500_common_chinese_characters.sql # example dataset (15 sets, 100 cards each)
 worker/
   index.ts                                # Hono app: all API routes + SPA fallback
   auth.ts                                 # PBKDF2 hashing, sessions, seed logic
@@ -116,7 +116,7 @@ catch-all route calls `ASSETS.fetch()`, and
 
 - `users` — one account. `sessions` — login cookies: the cookie value is a
   random 256-bit token that is also stored in the DB with a 7-day expiry.
-- `flashcard_sets` — a set of cards (e.g. "1500 Common Chinese Characters").
+- `flashcard_sets` — a set of cards (e.g. "Chinese Characters 1–100").
 - `set_faces` — the *column layout* of a set (e.g. `word`, `definition`,
   `pinyin`, …). Every card in the set has one text field per face.
 - `flashcards` + `flashcard_fields` — cards and their per-face text values.
@@ -164,9 +164,11 @@ cards by that due date.
 ### Seeding and the example dataset
 
 `db/schema.sql` creates all tables. `db/seed_1500_common_chinese_characters.sql`
-inserts one demonstration set — the 1500 most common Chinese characters — with
-six faces (`word`, `definition`, `pinyin`, `example sentence`, `example
-pinyin`, `example translation`), totalling 1500 cards and 9000 fields.
+inserts 15 demonstration sets of 100 cards — the 1500 most common Chinese
+characters split by frequency rank ("Chinese Characters 1–100" … "Chinese
+Characters 1401–1500") — with six faces (`word`, `definition`, `pinyin`,
+`example sentence`, `example pinyin`, `example translation`), totalling 1500
+cards and 9000 fields.
 
 The seed driver script in `package.json` simply passes these files to
 `wrangler d1 execute`. Wrangler splits the SQL on semicolons, splitting rows.

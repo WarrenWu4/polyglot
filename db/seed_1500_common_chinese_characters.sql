@@ -1,13 +1,18 @@
--- 1500 Common Chinese Characters -- personal study set.
+-- 1500 Common Chinese Characters -- personal study sets.
 --
 -- Generated from the POC dataset (polyglot-test/backend/sql/initialization).
 -- Apply AFTER the schema with:
 --   npm run db:seed          (local)
 --   npm run db:seed:remote   (remote)
 --
--- This file is idempotent: it drops and rebuilds the set, so the database always
+-- The 1500 characters are seeded as 15 sets of 100, named
+-- "Chinese Characters 1–100" ... "Chinese Characters 1401–1500" (each range is
+-- by source frequency rank: set 1 holds the 100 most common characters).
+--
+-- This file is idempotent: it drops and rebuilds the sets, so the database always
 -- matches the source data. Re-running discards study progress (FSRS schedules and
--- reviews) for this set only.
+-- reviews) for these sets only. It also removes the legacy single
+-- "1500 Common Chinese Characters" set, if present.
 --
 -- The 1500 rows are inserted in chunks because D1 rejects a single INSERT
 -- statement that is too long (SQLITE_TOOBIG).
@@ -1539,67 +1544,84 @@ INSERT INTO users (username, password_hash)
 SELECT 'admin', ''
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
 
--- Rebuild the set from scratch. ON DELETE CASCADE clears its cards, fields,
--- faces, study sessions, reviews and FSRS schedules.
+-- Rebuild the 15 sets from scratch. ON DELETE CASCADE clears their cards,
+-- fields, faces, study sessions, reviews and FSRS schedules. The legacy single
+-- "1500 Common Chinese Characters" set is removed too.
 DELETE FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
-  AND user_id = (SELECT id FROM users WHERE username = 'admin');
+WHERE user_id = (SELECT id FROM users WHERE username = 'admin')
+  AND (name = '1500 Common Chinese Characters' OR name LIKE 'Chinese Characters %');
 
+-- One set per 100-character frequency band.
+WITH RECURSIVE nums(n) AS (
+    SELECT 1
+    UNION ALL
+    SELECT n + 1 FROM nums WHERE n < 15
+)
 INSERT INTO flashcard_sets (user_id, name, description)
-SELECT id, '1500 Common Chinese Characters', 'The 1500 most common Chinese characters, with definitions, pinyin, and example sentences.'
-FROM users
-WHERE username = 'admin';
+SELECT u.id,
+       'Chinese Characters ' || ((n - 1) * 100 + 1) || '–' || (n * 100),
+       'The ' || ((n - 1) * 100 + 1) || 'th to ' || (n * 100) || 'th most common Chinese characters, with definitions, pinyin, and example sentences.'
+FROM nums
+JOIN users u ON u.username = 'admin';
 
--- D1 avoids compound SELECTs, so each face is inserted separately.
+-- D1 avoids compound SELECTs, so each face is inserted separately (fan out to
+-- all 15 sets per statement).
 INSERT INTO set_faces (set_id, name, position)
 SELECT id, 'word', 1
 FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
+WHERE name LIKE 'Chinese Characters %'
   AND user_id = (SELECT id FROM users WHERE username = 'admin');
 
 INSERT INTO set_faces (set_id, name, position)
 SELECT id, 'definition', 2
 FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
+WHERE name LIKE 'Chinese Characters %'
   AND user_id = (SELECT id FROM users WHERE username = 'admin');
 
 INSERT INTO set_faces (set_id, name, position)
 SELECT id, 'pinyin', 3
 FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
+WHERE name LIKE 'Chinese Characters %'
   AND user_id = (SELECT id FROM users WHERE username = 'admin');
 
 INSERT INTO set_faces (set_id, name, position)
 SELECT id, 'example sentence', 4
 FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
+WHERE name LIKE 'Chinese Characters %'
   AND user_id = (SELECT id FROM users WHERE username = 'admin');
 
 INSERT INTO set_faces (set_id, name, position)
 SELECT id, 'example pinyin', 5
 FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
+WHERE name LIKE 'Chinese Characters %'
   AND user_id = (SELECT id FROM users WHERE username = 'admin');
 
 INSERT INTO set_faces (set_id, name, position)
 SELECT id, 'example translation', 6
 FROM flashcard_sets
-WHERE name = '1500 Common Chinese Characters'
+WHERE name LIKE 'Chinese Characters %'
   AND user_id = (SELECT id FROM users WHERE username = 'admin');
 
--- Stagger created_at by row number so the set page's ORDER BY created_at ASC
--- yields source order (most common character first).
+-- Each seed row goes to the set covering its frequency band. Stagger
+-- created_at within each set by position so the set page's
+-- ORDER BY created_at ASC yields source order (most common character first).
 INSERT INTO flashcards (set_id, created_at)
-SELECT (SELECT id FROM flashcard_sets WHERE name = '1500 Common Chinese Characters' AND user_id = (SELECT id FROM users WHERE username = 'admin')), datetime('now', printf('+%d seconds', rn))
-FROM _seed_cards
-ORDER BY rn;
+SELECT (
+    SELECT id
+    FROM flashcard_sets
+    WHERE name = 'Chinese Characters ' || printf('%d–%d', ((c.rn - 1) / 100) * 100 + 1, ((c.rn - 1) / 100) * 100 + 100)
+      AND user_id = (SELECT id FROM users WHERE username = 'admin')
+), datetime('now', printf('+%d seconds', ((c.rn - 1) % 100) + 1))
+FROM _seed_cards c
+ORDER BY c.rn;
 
--- Six flashcard_fields rows per card (1500 x 6 = 9000). Pair each stored card to
--- its source row by insertion order via ROW_NUMBER().
+-- Six flashcard_fields rows per card (1500 x 6 = 9000). Pair each stored card
+-- to its source row by insertion order via ROW_NUMBER(), and to the faces of
+-- its own set.
 INSERT INTO flashcard_fields (flashcard_id, face_id, value)
 SELECT fc.id,
-       f.face_id,
-       CASE f.face
+       f.id,
+       CASE f.name
            WHEN 'word' THEN c.word
            WHEN 'definition' THEN c.definition
            WHEN 'pinyin' THEN c.pinyin
@@ -1609,15 +1631,15 @@ SELECT fc.id,
            ELSE c.word
        END
 FROM (
-    SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn
+    SELECT id, set_id, ROW_NUMBER() OVER (ORDER BY id) AS rn
     FROM flashcards
-    WHERE set_id = (SELECT id FROM flashcard_sets WHERE name = '1500 Common Chinese Characters' AND user_id = (SELECT id FROM users WHERE username = 'admin'))
+    WHERE set_id IN (
+        SELECT id FROM flashcard_sets
+        WHERE name LIKE 'Chinese Characters %'
+          AND user_id = (SELECT id FROM users WHERE username = 'admin')
+    )
 ) AS fc
 JOIN _seed_cards AS c ON c.rn = fc.rn
-CROSS JOIN (
-    SELECT id AS face_id, name AS face
-    FROM set_faces
-    WHERE set_id = (SELECT id FROM flashcard_sets WHERE name = '1500 Common Chinese Characters' AND user_id = (SELECT id FROM users WHERE username = 'admin'))
-) AS f;
+JOIN set_faces AS f ON f.set_id = fc.set_id;
 
 DROP TABLE IF EXISTS _seed_cards;
